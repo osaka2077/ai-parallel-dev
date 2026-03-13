@@ -20,6 +20,30 @@ Neue Funktionalitaet: WAS_DAZU_KOMMT
 NUR in `src/MODULE/` arbeiten. Bestehende Dateien duerfen geaendert werden,
 aber bestehende public APIs muessen kompatibel bleiben.
 
+## Pre-flight: Abhaengigkeits-Check (Chat macht das VOR Agent-Start)
+
+Bevor dieser Agent startet, pruefe mit GitNexus oder manuell:
+
+1. **Impact-Analyse auf den exklusiven Pfad:**
+   ```
+   orchestrate preflight prompts/roundN/
+   # oder manuell:
+   gitnexus impact <Haupt-Symbol> --direction downstream --depth 2
+   ```
+
+2. **Pruefe Ergebnis:**
+   - Gibt es Abhaengigkeiten AUSSERHALB des exklusiven Pfads?
+   - Falls ja: Pfad erweitern ODER zweiten Agent zuweisen ODER Interface einfuegen
+
+3. **Execution Flows validieren:**
+   ```
+   gitnexus query "MODULE workflow"
+   ```
+   - Welche Flows kreuzen die Pfadgrenze?
+   - Muessen diese Flows nach dem Merge noch funktionieren?
+
+Falls kein GitNexus verfuegbar: `grep -r "from MODULE import\|import MODULE" src/` als Fallback.
+
 ## Bestehender Code (NICHT brechen!)
 
 ```

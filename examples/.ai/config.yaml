@@ -17,3 +17,11 @@ tier_costs:
   opus: 8.0      # Complex architecture, multi-file refactors
   sonnet: 3.0    # Standard feature implementation
   haiku: 0.5     # Simple/routine tasks, test writing
+
+# GitNexus Integration (optional)
+# Wenn aktiviert, nutzt orchestrate.py GitNexus fuer Impact-Analyse
+gitnexus:
+  enabled: true           # false zum Deaktivieren
+  cli_path: null          # Auto-Detect, oder expliziter Pfad
+  impact_depth: 2         # Tiefe fuer Blast-Radius-Analyse
+  post_merge_impact: true # detect_changes nach Merge

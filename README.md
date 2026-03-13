@@ -150,6 +150,47 @@ orchestrate abort                          # Abort current round
 
 ---
 
+## GitNexus Integration (Optional)
+
+If your project is indexed by GitNexus, `orchestrate.py` can automatically detect cross-path dependencies before agents start and analyze merge impact afterwards.
+
+### Setup
+
+```bash
+# Index your codebase (one-time)
+gitnexus analyze .
+```
+
+### Pre-flight: Dependency Analysis
+
+```bash
+# After validate, before start — checks for cross-path dependencies
+orchestrate preflight prompts/round1/
+```
+
+This queries GitNexus for execution flows crossing exclusive path boundaries. If Agent A's path depends on files in Agent B's path, you'll see a warning with recommendations.
+
+### Post-Merge Impact
+
+After `orchestrate merge`, GitNexus automatically runs `detect_changes` to show:
+- Risk level (low/medium/high/critical)
+- Number of changed symbols and affected execution flows
+- Recommendation for full test suite on critical changes
+
+### Configuration
+
+In `.ai/config.yaml`:
+
+```yaml
+gitnexus:
+  enabled: true           # false to disable
+  cli_path: null          # auto-detect, or explicit path
+  impact_depth: 2         # blast radius depth
+  post_merge_impact: true # detect_changes after merge
+```
+
+**No GitNexus? No problem.** All features gracefully skip with an info message. Fallback: `grep -r "from MODULE import" src/`
+
 ## Project Structure
 
 ```

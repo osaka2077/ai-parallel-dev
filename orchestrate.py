@@ -11,6 +11,7 @@ Usage:
     orchestrate merge [--batch] [--bisect-on-failure] [--dry-run]
     orchestrate health
     orchestrate validate <prompt-dir>
+    orchestrate preflight [prompt-dir] [--depth N]
     orchestrate next
     orchestrate report
     orchestrate retry <agent-id> [--with-context "hint"]
@@ -77,6 +78,87 @@ logger = logging.getLogger("orchestrate")
 
 # Flag fuer Ctrl+C Handling waehrend Merge
 _merge_interrupted = False
+
+
+# ---------------------------------------------------------------------------
+# GitNexus Integration (optional)
+# ---------------------------------------------------------------------------
+
+def _detect_gitnexus() -> str | None:
+    """Sucht GitNexus CLI: PATH, bekannte Pfade, .ai/config.yaml Override."""
+    import shutil
+
+    # 1. Config-Override
+    config_path = Path(".ai/config.yaml")
+    if config_path.exists() and yaml is not None:
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+            gn_cfg = cfg.get("gitnexus", {})
+            if isinstance(gn_cfg, dict):
+                if not gn_cfg.get("enabled", True):
+                    return None
+                explicit = gn_cfg.get("cli_path")
+                if explicit and Path(explicit).exists():
+                    return str(explicit)
+        except Exception:
+            pass
+
+    # 2. PATH lookup
+    found = shutil.which("gitnexus")
+    if found:
+        return found
+
+    # 3. Bekannte Pfade
+    candidates = [
+        Path.home() / ".gitnexus" / "bin" / "gitnexus",
+        Path.home() / ".gitnexus" / "gitnexus",
+    ]
+    for c in candidates:
+        if c.exists():
+            return str(c)
+
+    return None
+
+
+def _run_gitnexus(cmd: list[str], timeout: int = 30) -> dict[str, Any] | None:
+    """Wrapper fuer GitNexus CLI-Aufruf. Gibt parsed JSON oder None zurueck."""
+    if not _gitnexus_cli:
+        return None
+    try:
+        full_cmd = [_gitnexus_cli, *cmd, "--format", "json"]
+        result = subprocess.run(
+            full_cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        if result.returncode != 0:
+            logger.debug("GitNexus Fehler: %s", result.stderr.strip())
+            return None
+        return json.loads(result.stdout)
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError) as e:
+        logger.debug("GitNexus nicht verfuegbar: %s", e)
+        return None
+
+
+def _gitnexus_config() -> dict[str, Any]:
+    """Laedt GitNexus-spezifische Config aus .ai/config.yaml."""
+    config_path = Path(".ai/config.yaml")
+    if not config_path.exists() or yaml is None:
+        return {}
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        return cfg.get("gitnexus", {}) if isinstance(cfg.get("gitnexus"), dict) else {}
+    except Exception:
+        return {}
+
+
+# Modul-Level Detection beim Import
+_gitnexus_cli: str | None = _detect_gitnexus()
+_gitnexus_available: bool = _gitnexus_cli is not None
 
 
 # ---------------------------------------------------------------------------
@@ -971,6 +1053,8 @@ def _batch_merge(
             a["status"] = AgentStatus.MERGED.value
             state["budget_spent"] = state.get("budget_spent", 0) + a.get("estimated_cost", 0)
 
+        _post_merge_impact(state)
+
         # Affected Tests
         test_paths = list({a["path"].rstrip("/") for a in validated})
         test_dirs = [f"tests/{p.split('/')[-1]}/" for p in test_paths if p]
@@ -999,6 +1083,8 @@ def _serial_merge(agents: list[dict[str, Any]], main_branch: str, state: dict[st
             print(f"  {Color.c(Color.RED, '✗')} {a['agent_id']} Merge-Konflikt")
             git("merge", "--abort", check=False)
             a["status"] = AgentStatus.FAILED.value
+
+    _post_merge_impact(state)
 
 
 def _bisect_merge(agents: list[dict[str, Any]], main_branch: str) -> None:
@@ -1036,6 +1122,69 @@ def _bisect_merge(agents: list[dict[str, Any]], main_branch: str) -> None:
         print(f"  Bisect: Problem in erster Haelfte ({len(first_half)} Agents).")
         git("merge", "--abort", check=False)
         _bisect_merge(first_half, main_branch)
+
+
+def _post_merge_impact(state: dict[str, Any]) -> None:
+    """GitNexus Post-Merge Impact-Analyse. Graceful skip wenn nicht verfuegbar."""
+    gn_cfg = _gitnexus_config()
+    if not gn_cfg.get("post_merge_impact", True):
+        return
+    if not _gitnexus_available:
+        logger.debug("GitNexus nicht verfuegbar — ueberspringe Post-Merge Impact.")
+        return
+
+    round_num = state.get("round_number", 1)
+    wave_idx = state.get("current_wave", 0)
+    base_ref = f"round-{round_num}-wave-{wave_idx}-pre-merge"
+
+    # Pruefen ob das Pre-Merge Tag existiert
+    tag_check = git("rev-parse", "--verify", base_ref, check=False)
+    if tag_check.returncode != 0:
+        logger.debug("Pre-Merge Tag '%s' nicht gefunden — ueberspringe Impact.", base_ref)
+        return
+
+    print(Color.c(Color.CYAN, "\n  GitNexus Post-Merge Impact:"))
+
+    result = _run_gitnexus([
+        "detect_changes",
+        "--scope", "compare",
+        "--base-ref", base_ref,
+    ])
+    if not result:
+        print(Color.c(Color.GRAY, "    (GitNexus detect_changes nicht verfuegbar)"))
+        return
+
+    risk = result.get("risk_level", "unknown")
+    changed_symbols = result.get("changed_symbols", [])
+    affected_processes = result.get("affected_processes", [])
+
+    # Farbe nach Risiko
+    risk_colors = {"low": Color.GREEN, "medium": Color.YELLOW, "high": Color.RED, "critical": Color.RED}
+    risk_color = risk_colors.get(risk, Color.GRAY)
+
+    sym_count = len(changed_symbols)
+    proc_count = len(affected_processes)
+    print(f"    Risk: {Color.c(risk_color, risk)} | "
+          f"{sym_count} Symbole geaendert | "
+          f"{proc_count} Prozesse betroffen")
+
+    for proc in affected_processes[:5]:
+        proc_name = proc.get("name", "unbekannt")
+        steps_changed = proc.get("steps_changed", 0)
+        print(f"    {Color.c(Color.YELLOW, '⚠')} Betroffener Prozess: "
+              f"\"{proc_name}\" ({steps_changed} Steps geaendert)")
+
+    if risk == "critical":
+        print(Color.c(Color.RED, "\n    ⚠ KRITISCHES Risiko — Full Test Suite empfohlen!"))
+        print("    -> orchestrate test --full")
+
+    # Im State speichern
+    state["merge_impact"] = {
+        "risk_level": risk,
+        "changed_symbols_count": sym_count,
+        "affected_processes_count": proc_count,
+        "affected_processes": [p.get("name", "") for p in affected_processes[:10]],
+    }
 
 
 def cmd_next(args: argparse.Namespace) -> None:
@@ -1149,6 +1298,129 @@ def cmd_validate(args: argparse.Namespace) -> None:
     else:
         print(Color.c(Color.YELLOW, "  ⚠ Fixes noetig bevor Start"))
     print()
+
+
+def cmd_preflight(args: argparse.Namespace) -> None:
+    """orchestrate preflight [prompt-dir] — GitNexus Impact-Analyse vor Start."""
+    if not _gitnexus_available:
+        print(Color.c(Color.GRAY, "GitNexus nicht gefunden. Ueberspringe Impact-Analyse."))
+        print("  Installiere GitNexus und fuehre 'gitnexus analyze .' aus.")
+        print("  Alternativ: grep -r 'from MODULE import\\|import MODULE' src/")
+        return
+
+    prompt_dir = Path(args.prompt_dir) if args.prompt_dir else _find_prompt_dir()
+    if not prompt_dir or not prompt_dir.exists():
+        print(f"Prompt-Verzeichnis nicht gefunden: {prompt_dir}")
+        sys.exit(1)
+
+    gn_cfg = _gitnexus_config()
+    depth = getattr(args, "depth", None) or gn_cfg.get("impact_depth", 2)
+
+    prompt_files = sorted(prompt_dir.glob("*.md"))
+    if not prompt_files:
+        print(f"Keine .md Dateien in {prompt_dir}")
+        return
+
+    print(Color.c(Color.BOLD, f"\nPre-flight Impact-Analyse: {prompt_dir}\n"))
+
+    # Schritt 1: Pfade und Agent-IDs aus Prompts extrahieren
+    agent_paths: dict[str, str] = {}  # path -> agent_id
+    for pf in prompt_files:
+        fm_content = pf.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(fm_content)
+        if fm:
+            path = str(fm.get("exclusive_path", "")).rstrip("/")
+            agent_id = fm.get("branch", pf.stem)
+            if path:
+                agent_paths[path] = agent_id
+
+    if not agent_paths:
+        print(Color.c(Color.YELLOW, "  Keine exclusive_path Eintraege in Prompts gefunden."))
+        return
+
+    # Schritt 2: Fuer jeden Pfad GitNexus query + impact
+    warnings: list[str] = []
+    for path, agent_id in agent_paths.items():
+        print(f"  Analysiere {Color.c(Color.CYAN, path)} ({agent_id})...")
+
+        # Query: Welche Execution Flows beruehren diesen Pfad?
+        query_result = _run_gitnexus(["query", path])
+        if not query_result:
+            print(Color.c(Color.GRAY, f"    (keine GitNexus-Daten fuer {path})"))
+            continue
+
+        # Symbole an der Pfadgrenze finden
+        symbols = query_result.get("symbols", [])
+        boundary_symbols = [
+            s for s in symbols
+            if s.get("file", "").startswith(path + "/")
+        ]
+
+        for sym in boundary_symbols:
+            sym_name = sym.get("name", sym.get("qualified_name", ""))
+            if not sym_name:
+                continue
+
+            # Impact-Analyse: Was haengt von diesem Symbol ab?
+            impact = _run_gitnexus([
+                "impact", sym_name,
+                "--direction", "downstream",
+                "--depth", str(depth),
+            ])
+            if not impact:
+                continue
+
+            affected = impact.get("affected", [])
+            for dep in affected:
+                dep_file = dep.get("file", "")
+                dep_name = dep.get("name", "")
+
+                # Liegt die Abhaengigkeit AUSSERHALB dieses Pfads?
+                if dep_file and not dep_file.startswith(path + "/"):
+                    # Gehoert sie zu einem ANDEREN Agent?
+                    other_agent = None
+                    for other_path, other_id in agent_paths.items():
+                        if other_path != path and dep_file.startswith(other_path + "/"):
+                            other_agent = other_id
+                            break
+
+                    warning = f"  {Color.c(Color.YELLOW, '⚠')} {sym.get('file', '')}:{sym_name}"
+                    warning += f"\n    -> wird genutzt von {dep_file}"
+                    if dep_name:
+                        warning += f":{dep_name}"
+                    if other_agent:
+                        warning += f" (Agent: {other_agent})"
+                        warning += f"\n    -> Empfehlung: Pfad erweitern ODER gemeinsames Interface"
+                    warnings.append(warning)
+
+    # Schritt 3: Zusammenfassung
+    separator = "─" * 60
+    print(f"\n{separator}")
+    if warnings:
+        print(Color.c(Color.YELLOW, f"  {len(warnings)} Cross-Path Abhaengigkeit(en) gefunden:\n"))
+        for w in warnings:
+            print(w)
+            print()
+        print(Color.c(Color.YELLOW, "  Empfehlung: Pfade anpassen oder Interfaces einfuegen."))
+    else:
+        print(Color.c(Color.GREEN, "  -> Keine Cross-Path Abhaengigkeiten gefunden."))
+    print()
+
+
+def _find_prompt_dir() -> Path | None:
+    """Versucht das aktuelle Prompt-Verzeichnis zu finden."""
+    state = load_state()
+    if state:
+        round_num = state.get("round_number", 1)
+        candidate = Path(PROMPTS_DIR) / f"round{round_num}"
+        if candidate.exists():
+            return candidate
+    # Fallback: erstes Verzeichnis in prompts/
+    prompts = Path(PROMPTS_DIR)
+    if prompts.exists():
+        dirs = sorted(d for d in prompts.iterdir() if d.is_dir())
+        return dirs[0] if dirs else None
+    return None
 
 
 def cmd_report(args: argparse.Namespace) -> None:
@@ -1503,6 +1775,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_val = sub.add_parser("validate", help="Prompts validieren")
     p_val.add_argument("prompt_dir", help="Pfad zum Prompt-Verzeichnis")
 
+    # preflight
+    p_pre = sub.add_parser("preflight", help="GitNexus Impact-Analyse vor Start")
+    p_pre.add_argument("prompt_dir", nargs="?", default=None, help="Pfad zum Prompt-Verzeichnis")
+    p_pre.add_argument("--depth", type=int, default=2, help="Impact-Analyse Tiefe")
+
     # report
     sub.add_parser("report", help="Post-Runde Report generieren")
 
@@ -1549,6 +1826,7 @@ def main() -> None:
         "merge": cmd_merge,
         "next": cmd_next,
         "validate": cmd_validate,
+        "preflight": cmd_preflight,
         "report": cmd_report,
         "retry": cmd_retry,
         "skip": cmd_skip,
