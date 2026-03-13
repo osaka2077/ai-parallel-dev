@@ -1084,7 +1084,8 @@ def _serial_merge(agents: list[dict[str, Any]], main_branch: str, state: dict[st
             git("merge", "--abort", check=False)
             a["status"] = AgentStatus.FAILED.value
 
-    _post_merge_impact(state)
+    if not _merge_interrupted:
+        _post_merge_impact(state)
 
 
 def _bisect_merge(agents: list[dict[str, Any]], main_branch: str) -> None:
@@ -1314,7 +1315,9 @@ def cmd_preflight(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     gn_cfg = _gitnexus_config()
-    depth = getattr(args, "depth", None) or gn_cfg.get("impact_depth", 2)
+    depth = getattr(args, "depth", None)
+    if depth is None:
+        depth = gn_cfg.get("impact_depth", 2)
 
     prompt_files = sorted(prompt_dir.glob("*.md"))
     if not prompt_files:

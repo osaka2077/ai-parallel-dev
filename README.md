@@ -122,6 +122,7 @@ orchestrate health                         # Health-checks all agents
 orchestrate merge [--batch] [--bisect-on-failure] [--dry-run]
 orchestrate next                           # Dispatch next wave
 orchestrate validate <prompt-dir>          # Validate prompts before start
+orchestrate preflight [prompt-dir]            # GitNexus dependency analysis
 orchestrate report                         # Generate round report
 orchestrate retry <agent-id> [--with-context "hint"]
 orchestrate skip <agent-id>
