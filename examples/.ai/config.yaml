@@ -1,0 +1,19 @@
+# .ai/config.yaml — Orchestrator Configuration
+#
+# Copy this to your project's .ai/config.yaml and adjust.
+
+# Test runner command (default: pytest)
+# For Python:
+test_runner: pytest
+# For JavaScript/TypeScript:
+# test_runner: ["npm", "test"]
+# Custom:
+# test_runner: ["python", "-m", "pytest", "--tb=short", "-q"]
+
+# Cost calibration per prompt/agent invocation.
+# These are HEURISTIC estimates. After 2-3 rounds, check your actual
+# Claude billing and adjust these values for accurate budget tracking.
+tier_costs:
+  opus: 8.0      # Complex architecture, multi-file refactors
+  sonnet: 3.0    # Standard feature implementation
+  haiku: 0.5     # Simple/routine tasks, test writing

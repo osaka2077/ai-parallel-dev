@@ -1,0 +1,45 @@
+# manifest.yaml — Round 1 Example
+#
+# Defines waves and agents for a typical SaaS backend.
+# Wave 1: Foundation (auth + models run in parallel)
+# Wave 2: API layer (depends on auth + models being merged)
+# Wave 3: Integration tests (depends on everything)
+
+waves:
+  - name: "Wave 1 - Foundation"
+    agents:
+      - file: "agent_auth.md"
+        branch: "agent-r1-auth"
+        path: "src/auth/"
+        tier: "sonnet"
+
+      - file: "agent_models.md"
+        branch: "agent-r1-models"
+        path: "src/models/"
+        tier: "haiku"
+
+  - name: "Wave 2 - API"
+    depends_on: "Wave 1 - Foundation"
+    required_agents:
+      - "agent-r1-auth"
+      - "agent-r1-models"
+    agents:
+      - file: "agent_api.md"
+        branch: "agent-r1-api"
+        path: "src/api/"
+        tier: "sonnet"
+
+      - file: "agent_notifications.md"
+        branch: "agent-r1-notifications"
+        path: "src/notifications/"
+        tier: "haiku"
+
+  - name: "Wave 3 - Integration"
+    depends_on: "Wave 2 - API"
+    required_agents:
+      - "agent-r1-api"
+    agents:
+      - file: "agent_integration_tests.md"
+        branch: "agent-r1-integration"
+        path: "tests/integration/"
+        tier: "sonnet"
