@@ -140,14 +140,16 @@ orchestrate abort                          # Abort current round
 | B | Wave-by-wave, merge between waves | **Default.** Most projects. |
 | C | Conservative, single agent at a time | Critical systems, learning the method |
 
-### Budget Caps
+### Prompt Limits (Abo-basiert)
 
-| Label | Cap | Typical Use |
-|-------|-----|-------------|
-| SMALL | $50 | 2-3 agents, simple features |
-| MEDIUM | $100 | 4-6 agents, standard development |
-| LARGE | $200 | 8+ agents, complex features |
-| XL | $300 | Full parallel development |
+| Label | Max Prompts | Typical Use |
+|-------|-------------|-------------|
+| SMALL | 10 | 2-3 agents, simple features |
+| MEDIUM | 25 | 4-6 agents, standard development |
+| LARGE | 50 | 8+ agents, complex features |
+| XL | 100 | Full parallel development |
+
+> **Hinweis:** Bei Claude Pro/Max Abo fallen keine API-Kosten an. Das Budget zaehlt Prompt-Dispatches pro Runde, nicht Dollar.
 
 ---
 
@@ -212,7 +214,7 @@ your-project/
 │       ├── agent_api.md        # Prompt for API agent
 │       └── agent_models.md     # Prompt for models agent
 └── .ai/
-    ├── config.yaml             # Test runner, cost calibration
+    ├── config.yaml             # Test runner, prompt limits
     ├── context_bootstrap.md    # Quick-start context for Chat
     ├── learnings.md            # What worked, what didn't
     ├── decisions_log.md        # Architecture decisions
@@ -237,11 +239,12 @@ test_runner: pytest
 # Or custom:
 # test_runner: ["python", "-m", "pytest", "--tb=short"]
 
-# Cost calibration (adjust after 2-3 rounds with real billing data)
-tier_costs:
-  opus: 8.0      # $/prompt for complex tasks
-  sonnet: 3.0    # $/prompt for standard tasks
-  haiku: 0.5     # $/prompt for routine tasks
+# Prompt-Limits pro Runde anpassen (optional)
+budget_caps:
+  SMALL: 10
+  MEDIUM: 25
+  LARGE: 50
+  XL: 100
 ```
 
 ---
@@ -262,7 +265,7 @@ The complete methodology document with all details, examples, and checklists:
 
 **[methodology.md](methodology.md)**
 
-Covers: Role model, 6-phase cycle, prompt templates, merge strategies, health monitoring, cost management, shared files handling, rollback strategy, CI/CD integration, persistence system, and quality pillars.
+Covers: Role model, 6-phase cycle, prompt templates, merge strategies, health monitoring, prompt tracking, shared files handling, rollback strategy, CI/CD integration, persistence system, and quality pillars.
 
 ---
 

@@ -10,13 +10,13 @@ test_runner: pytest
 # Custom:
 # test_runner: ["python", "-m", "pytest", "--tb=short", "-q"]
 
-# Cost calibration per prompt/agent invocation.
-# These are HEURISTIC estimates. After 2-3 rounds, check your actual
-# Claude billing and adjust these values for accurate budget tracking.
-tier_costs:
-  opus: 8.0      # Complex architecture, multi-file refactors
-  sonnet: 3.0    # Standard feature implementation
-  haiku: 0.5     # Simple/routine tasks, test writing
+# Prompt-Limits pro Runde (Abo-basiert, keine API-Kosten).
+# Bei Claude Pro/Max Abo zaehlen wir Prompt-Dispatches, nicht Dollar.
+budget_caps:
+  SMALL: 10      # 2-3 Agents, einfache Features
+  MEDIUM: 25     # 4-6 Agents, Standard-Entwicklung
+  LARGE: 50      # 8+ Agents, komplexe Features
+  XL: 100        # Volle parallele Entwicklung
 
 # GitNexus Integration (optional)
 # Wenn aktiviert, nutzt orchestrate.py GitNexus fuer Impact-Analyse

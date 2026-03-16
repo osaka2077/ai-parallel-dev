@@ -63,7 +63,7 @@ Alles andere im Dokument macht diese 5 Schritte schneller, sicherer und skalierb
 │ Serieller Merge         │ ✓ Batch-Merge           │ ✓ Batch-Merge +     │
 │ (wenige Agents = OK)    │                         │   Bisect + Tiered   │
 ├─────────────────────────┼─────────────────────────┼─────────────────────┤
-│ Budget: SMALL ($30-50)  │ Budget: MEDIUM ($50-100)│ Budget: LARGE+      │
+│ Budget: SMALL (10 Pr.)  │ Budget: MEDIUM (25 Pr.) │ Budget: LARGE+      │
 │ Modus: B oder C         │ Modus: B                │ Modus: A oder B     │
 ├─────────────────────────┼─────────────────────────┼─────────────────────┤
 │ Typisch: Web-Features,  │ Typisch: SaaS-Module,   │ Typisch: Compiler,  │
@@ -435,7 +435,7 @@ find . -path "*/kernelforge/jit_engine/*" -type f | wc -l
 ```
 WARUM: "Qualität kommt vom Prompt" heißt auch:
        "Schlechter Prompt = 8 Agents produzieren gleichzeitig Müll"
-       Ein Validator fängt das ab BEVOR es $50-100 kostet.
+       Ein Validator fängt das ab BEVOR 25+ Prompts verschwendet werden.
 
 orchestrate validate ./prompts/round4/
 → Prüft JEDEN Prompt gegen Pflicht-Kriterien:
@@ -464,7 +464,7 @@ orchestrate validate ./prompts/round4/
 │ □ Kein Pfad-Overlap zwischen Agents derselben Wave?              │
 │ □ Alle shared_interfaces Types die im Prompt verwendet werden    │
 │   existieren tatsächlich in shared_interfaces.py?                │
-│ □ Summe aller Agent-Budgets ≤ Runden-Budget?                     │
+│ □ Summe aller Agent-Prompts ≤ Runden-Prompt-Limit?               │
 └──────────────────────────────────────────────────────────────────┘
 
 Ergebnis:
@@ -576,7 +576,7 @@ Wann: Neue Domains, kritische Architecture, Foundation-Runden.
 Modell-Mix:  2× Opus (Architektur-Agents)
              4× Sonnet (Feature-Agents)
              2× Haiku (Test/Boilerplate-Agents)
-Budget:      $30-50 pro Runde
+Budget:      SMALL (max. 10 Prompts pro Runde)
 ```
 
 #### Modus B: Balanced (Empfehlung für die meisten Runden)
@@ -589,7 +589,7 @@ Wann: Feature-Erweiterung, Standard-Runden.
 Modell-Mix:  2× Opus (nur wenn neue Patterns nötig)
              10× Sonnet (Kern-Agents)
              6× Haiku (Tests + Boilerplate)
-Budget:      $50-80 pro Runde
+Budget:      MEDIUM (max. 25 Prompts pro Runde)
 ```
 
 #### Modus C: Maximaler Durchsatz
@@ -602,7 +602,7 @@ Wann: Prototyping, Breadth-Runden wo Qualität weniger kritisch ist.
 Modell-Mix:  2× Opus (nur kritische Pfade)
              20× Sonnet (Bulk-Arbeit)
              20× Haiku (Repetitive Tasks)
-Budget:      $80-130 pro Runde
+Budget:      LARGE (max. 50 Prompts pro Runde)
 ```
 
 #### Pipeline-Modus (für alle Modi anwendbar)
@@ -660,9 +660,9 @@ Chat überwacht: Agent Health (Details → Sektion "Agent Health Monitoring").
 │ → git diff --name-only zeigt geänderte Dateien                    │
 │ → Dateien außerhalb des Pfads? ✗ VIOLATION — sofort stoppen       │
 ├────────────────────────────────────────────────────────────────────┤
-│ CHECK 3: TOKEN-BUDGET                                              │
-│ Wie viele Tokens hat der Agent verbraucht?                         │
-│ → < 80% des Agent-Budgets: ✓                                     │
+│ CHECK 3: PROMPT-BUDGET                                             │
+│ Wie viele Prompts/Dispatches hat der Agent verbraucht?             │
+│ → < 80% des Agent-Prompt-Limits: ✓                               │
 │ → 80-100%: ⚠ WARN — Agent muss bald fertig werden                │
 │ → >100%: ✗ BUDGET_EXCEEDED — Agent wird abgebrochen               │
 ├────────────────────────────────────────────────────────────────────┤
@@ -683,7 +683,7 @@ Chat überwacht: Agent Health (Details → Sektion "Agent Health Monitoring").
 KLASSE A — AUTOMATISCH BEHEBBAR (kein menschliches Eingreifen)
 ──────────────────────────────────────────────────────────────
   TIMEOUT:        Agent hängt seit 15+ min
-  BUDGET_EXCEEDED: Agent hat Token-Budget überschritten
+  BUDGET_EXCEEDED: Agent hat Prompt-Limit überschritten
   NO_OUTPUT:      Agent hat nach Timeout nichts produziert
   → Aktion: Agent stoppen. Terminal freigeben.
     Prompt in Retry-Queue mit Fehler-Kontext.
@@ -740,7 +740,7 @@ Agent meldet sich als fertig (oder wird gestoppt):
 └─ ✗ BUDGET_EXCEEDED
    → Branch behalten (was da ist, ist da)
    → Wenn brauchbar: manuell zu Ende bringen
-   → Wenn nicht: retry mit Haiku (günstiger) oder Scope reduzieren
+   → Wenn nicht: retry mit Haiku (einfacherer Task) oder Scope reduzieren
 ```
 
 ##### Kaskadierende Failures: Wave-Abhängigkeiten
@@ -881,7 +881,7 @@ WARUM: Fängt subtile Cross-Wave-Interaktionen die Affected Tests verpassen.
 **Wer:** Chat (Hirn) — NICHT die Agents
 **Ziel:** Lernen. Jede Runde besser als die letzte.
 
-Du gibst Chat die Ergebnisse (Merge-Logs, Test-Outputs, Kosten).
+Du gibst Chat die Ergebnisse (Merge-Logs, Test-Outputs, Prompt-Verbrauch).
 Chat analysiert — sein Context ist SAUBER weil er nicht implementiert hat.
 
 ```
@@ -906,15 +906,14 @@ Code-Intelligence Insights:
   Höchste Kopplung: CompilationPipeline (47 eingehende Imports)
   → Risiko: Pipeline wird zum God Object. Nächste Runde: Refactoring?
 
-Kosten:
-  Budget: MEDIUM ($100)
-  Verbraucht: ~$72 (72%) — geschätzt, Token-basiert
+Prompt-Verbrauch:
+  Limit: MEDIUM (25 Prompts)
+  Verbraucht: 18/25 Prompts (72%)
   Aufschlüsselung:
-    Tier 1 (Opus):   2 Agents × ~$12  = ~$24
-    Tier 2 (Sonnet): 5 Agents × ~$4   = ~$20
-    Tier 3 (Haiku):  3 Agents × ~$1   = ~$3
-    Chat (Planung):  ~$15
-    Code-Intelligence: ~$10
+    Tier 1 (Opus):   2 Agents × 2 Prompts  = 4 Prompts
+    Tier 2 (Sonnet): 5 Agents × 2 Prompts  = 10 Prompts
+    Tier 3 (Haiku):  3 Agents × 1 Prompt   = 3 Prompts
+    Chat (Planung):  ~1 Prompt
   Optimierung: Agent 4 hätte als Haiku laufen können (nur Boilerplate)
 
 Agent Health:
@@ -1006,7 +1005,7 @@ Prompt: "Die folgenden Module wurden soeben gemerged:
          3. src/routes/index.ts (neue Route-Registrierungen)
          Ändere NICHTS ANDERES."
 
-Vorteil: Automatisierbar, konsistent, günstig (Haiku, <$1)
+Vorteil: Automatisierbar, konsistent, minimal (Haiku, 1 Prompt)
 Nachteil: Noch ein Agent der fehlschlagen kann
 ```
 
@@ -1236,7 +1235,7 @@ Schritt 1: context_bootstrap.md lesen (~30 Sekunden)
   → Chat weiß: Was ist das Projekt, was ist passiert, was sind die Regeln
 
 Schritt 2: Letzten Round Report lesen (~30 Sekunden)
-  → Chat weiß: Details der letzten Runde (Tests, Kosten, Metriken)
+  → Chat weiß: Details der letzten Runde (Tests, Prompt-Verbrauch, Metriken)
 
 Schritt 3: learnings.md lesen (~20 Sekunden)
   → Chat weiß: Was NICHT tun (akkumulierte Fehler-Vermeidung)
@@ -1417,14 +1416,14 @@ jobs:
 
 ---
 
-## KOSTEN-MANAGEMENT
+## PROMPT-MANAGEMENT
 
-### Realistische Kosten (Token-basiert)
+### Prompt-Verbrauch pro Tier (Subscription-basiert)
 
 ```
-WICHTIG: Kosten hängen von TOKEN-VERBRAUCH ab, nicht von der Anzahl Prompts.
-Die folgenden Zahlen sind HEURISTIKEN basierend auf typischen Agent-Runs.
-Tatsächliche Kosten können 50-200% davon abweichen.
+Du nutzt Claude Pro/Max (Flatrate-Abo). Es gibt KEINE Token-Kosten.
+Stattdessen trackst du den PROMPT-VERBRAUCH: Wie viele Agent-Dispatches
+und Chat-Interaktionen pro Runde? Das ist dein Budget.
 
 ┌─────────────────────────────────────────────────────────────────────┐
 │                                                                     │
@@ -1432,8 +1431,8 @@ Tatsächliche Kosten können 50-200% davon abweichen.
 │                                                                     │
 │  Wann: Neue Architektur, komplexe Algorithmen, System-Design       │
 │  Typisch: 1-2 Agents pro Runde                                    │
-│  Geschätzte Kosten: ~$8-25 pro Agent-Run                          │
-│  (Varianz hoch — abhängig von Context-Größe und Dauer)            │
+│  Verbrauch: ~2-3 Prompts pro Agent-Run (inkl. Retries)            │
+│  Fähigkeit: Höchste Qualität für komplexe Entscheidungen          │
 │                                                                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
@@ -1441,7 +1440,7 @@ Tatsächliche Kosten können 50-200% davon abweichen.
 │                                                                     │
 │  Wann: Feature-Implementierung, Module erweitern, Standard-Code   │
 │  Typisch: 4-5 Agents pro Runde                                    │
-│  Geschätzte Kosten: ~$2-8 pro Agent-Run                           │
+│  Verbrauch: ~1-2 Prompts pro Agent-Run                            │
 │                                                                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
@@ -1449,37 +1448,36 @@ Tatsächliche Kosten können 50-200% davon abweichen.
 │                                                                     │
 │  Wann: Tests schreiben, Boilerplate, Docs, einfache Erweiterungen │
 │  Typisch: 2-3 Agents pro Runde                                    │
-│  Geschätzte Kosten: ~$0.50-2 pro Agent-Run                        │
+│  Verbrauch: ~1 Prompt pro Agent-Run                               │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 
-Entscheidungsmatrix:
+Entscheidungsmatrix (nach FÄHIGKEIT, nicht Kosten):
   Muss der Agent Architektur-Entscheidungen treffen?  → Opus
   Gibt es ein klares Muster/Template?                 → Sonnet
   Ist der Task hauptsächlich repetitiv/mechanisch?    → Haiku
 ```
 
-### Budget-Caps
+### Prompt-Limits
 
 ```
-Budget wird VOR der Runde festgelegt:
+Prompt-Limit wird VOR der Runde festgelegt (Anzahl Agent-Dispatches):
 
-  SMALL  = $50   (Bug-Fixes, kleine Features, Refactoring)
-  MEDIUM = $100  (Standard-Features, neue Module)
-  LARGE  = $200  (Neue Domains, Major-Features)
-  XL     = $300  (Foundation-Runden, Architektur-Umbau)
+  SMALL  = 10 Prompts  (Bug-Fixes, kleine Features, Refactoring)
+  MEDIUM = 25 Prompts  (Standard-Features, neue Module)
+  LARGE  = 50 Prompts  (Neue Domains, Major-Features)
+  XL     = 100 Prompts (Foundation-Runden, Architektur-Umbau)
 
 Regeln:
-  - Budget ist eine OBERGRENZE, keine Prognose
-  - Wenn 80% geschätzt erreicht: verbleibende Agents auf Haiku downgraden
-  - Wenn 100% geschätzt erreicht: Runde beenden, Analyse machen
-  - Tatsächliche Kosten nach Runde im Claude Dashboard prüfen
-    → In Phase 4 Report als echte Zahl eintragen
+  - Prompt-Limit ist eine OBERGRENZE, keine Prognose
+  - Wenn 80% verbraucht: verbleibende Agents auf Haiku downgraden
+  - Wenn 100% verbraucht: Runde beenden, Analyse machen
+  - Prompt-Verbrauch nach Runde zählen (Dispatches + Retries)
+    → In Phase 4 Report eintragen
 
-Kosten-Tracking:
-  Geschätzt (Heuristik):  orchestrate.py trackt pro Agent-Tier
-  Tatsächlich (exakt):     Claude Dashboard / API Usage nach der Runde
-  → Phase 4 vergleicht beides und kalibriert Heuristik für nächste Runde
+Prompt-Tracking:
+  orchestrate.py zählt Dispatches pro Agent und Tier
+  → Phase 4 vergleicht Plan vs. tatsächlichen Verbrauch
 ```
 
 ---
@@ -1516,10 +1514,10 @@ orchestrate.py — Kommandos:
   orchestrate start <round> [--mode A|B|C] [--budget MEDIUM]
     Liest Prompt-Dateien aus ./prompts/round<N>/
     Validiert alle Prompts, erstellt Branches
-    Startet Budget-Tracking
+    Startet Prompt-Tracking
 
   orchestrate status
-    Dashboard: Fortschritt, Health, Budget pro Agent
+    Dashboard: Fortschritt, Health, Prompt-Verbrauch pro Agent
 
   orchestrate merge [--batch] [--bisect-on-failure]
     Pre-Merge Validierung (Stufe 1)
@@ -1662,11 +1660,11 @@ Lösung: Automatische Analyse: Tests pro Agent, Edge-Case-Quote, Lint-Rate.
 Ergebnis: Daten-getriebene Verbesserung statt Bauchgefühl.
 ```
 
-### 7. Wirtschaftlichkeit durch Modell-Tiers + Budget-Caps
+### 7. Effizienz durch Modell-Tiers + Prompt-Limits
 ```
-Problem: 8× Opus pro Runde ist unnötig teuer.
-Lösung: 3-Tier-System + Budget-Caps + Token-basiertes Tracking.
-Ergebnis: 60-75% Kosten-Reduktion. Kalibrierung durch echte Daten.
+Problem: 8× Opus pro Runde verschwendet Prompts für einfache Tasks.
+Lösung: 3-Tier-System (nach Fähigkeit) + Prompt-Limits pro Runde.
+Ergebnis: Optimaler Prompt-Einsatz. Richtige Capability für den richtigen Task.
 ```
 
 ### 8. Fokus durch Orchestrator-Automatisierung
@@ -1730,7 +1728,7 @@ Wave-Plan (Modus A):
   Wave 2: Class Codegen (4 Agents)
   Wave 3: Generators + Integration (4 Agents)
 
-Budget: MEDIUM ($100)
+Budget: MEDIUM (25 Prompts)
 ```
 
 ### Phase 2 — Agents laufen:
@@ -1765,7 +1763,7 @@ Total: 15 min (inkl. 1 Bisect + Fix)
 Chat: "Runde 5 Analyse:
   Tests: +380, Edge-Cases 28% (über Ziel ✓)
   Merge: 1 Bisect (Format-Inkompatibilität, durch shared_interfaces vermeidbar)
-  Kosten: ~$68 von $100 Budget
+  Prompts: 18/25 verbraucht (72%)
   Empfehlung: Strategy Pattern in Runde 6, Error-Cases erhöhen"
 ```
 
@@ -1834,7 +1832,7 @@ Chat: "Runde 5 Analyse:
   □ decisions_log.md erweitert
   □ context_bootstrap.md NEU GENERIERT
   □ git commit der .ai/ Änderungen
-□ Tatsächliche Kosten aus Claude Dashboard notiert
+□ Tatsächlichen Prompt-Verbrauch notiert
 □ Stratege informiert → Richtung für nächste Runde
 ```
 
@@ -1905,7 +1903,7 @@ Beispiel: "Runde 3 — Dashboard + Auth"
     Agent 5 (Sonnet): Realtime-Hook — Pfad: src/hooks/ + src/store/dashboard.ts
     Agent 6 (Haiku):  E2E Tests — Pfad: tests/e2e/ + tests/integration/
 
-  Budget: SMALL ($50)
+  Budget: SMALL (10 Prompts)
   Shared Files: package.json → Fragment-Strategie
                 src/routes/index.ts → Reconciliation-Agent nach Merge
 

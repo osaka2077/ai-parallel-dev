@@ -52,19 +52,13 @@ STATE_FILE = ".ai/orchestrator_state.json"
 REPORTS_DIR = ".ai/round_reports"
 PROMPTS_DIR = "prompts"
 
+# Prompt-Limits pro Runde (Abo-basiert, keine API-Kosten).
+# Bei Claude Pro/Max Abo zaehlen wir Prompts, nicht Dollar.
 BUDGET_CAPS: dict[str, int] = {
-    "SMALL": 50,
-    "MEDIUM": 100,
-    "LARGE": 200,
-    "XL": 300,
-}
-
-# Heuristische Schaetzwerte pro Prompt-Aufruf (Token-basiert).
-# Kalibriere nach 2-3 Runden mit echten Werten aus der Claude-Abrechnung.
-TIER_COST_PER_PROMPT: dict[str, float] = {
-    "opus": 8.0,
-    "sonnet": 3.0,
-    "haiku": 0.5,
+    "SMALL": 10,
+    "MEDIUM": 25,
+    "LARGE": 50,
+    "XL": 100,
 }
 
 HEALTH_INTERVAL_SEC = 60
@@ -220,7 +214,7 @@ class AgentState:
     test_count: int = 0
     file_count: int = 0
     failure_class: str | None = None
-    estimated_cost: float = 0.0
+    prompts_used: int = 0
 
 
 @dataclass
@@ -229,7 +223,7 @@ class RoundState:
     mode: str
     budget_label: str
     budget_cap: int
-    budget_spent: float = 0.0
+    budget_spent: int = 0
     agents: list[dict[str, Any]] = field(default_factory=list)
     current_wave: int = 0
     started_at: str | None = None
@@ -401,12 +395,12 @@ def _load_config() -> dict[str, Any]:
     elif isinstance(runner, list):
         TEST_RUNNER = runner
 
-    # Kosten-Kalibrierung
-    cost_overrides = config.get("tier_costs")
-    if isinstance(cost_overrides, dict):
-        for tier, cost in cost_overrides.items():
-            if isinstance(cost, (int, float)):
-                TIER_COST_PER_PROMPT[tier] = float(cost)
+    # Abo-spezifische Budget-Overrides (optional)
+    budget_overrides = config.get("budget_caps")
+    if isinstance(budget_overrides, dict):
+        for size, cap in budget_overrides.items():
+            if isinstance(cap, int):
+                BUDGET_CAPS[size] = cap
 
     return config
 
@@ -660,7 +654,7 @@ def cmd_start(args: argparse.Namespace) -> None:
         logger.error("Keine Prompt-Dateien in %s gefunden", prompt_dir)
         sys.exit(1)
 
-    print(Color.c(Color.BOLD, f"\n=== RUNDE {round_num} — Modus {mode} — Budget {budget_label} (${budget_cap}) ===\n"))
+    print(Color.c(Color.BOLD, f"\n=== RUNDE {round_num} — Modus {mode} — Budget {budget_label} ({budget_cap} Prompts) ===\n"))
 
     # Validierung
     print(Color.c(Color.CYAN, "Prompt-Validierung..."))
@@ -710,7 +704,6 @@ def cmd_start(args: argparse.Namespace) -> None:
         for ag in wave_agents:
             agent_file = ag.get("file", "")
             tier = ag.get("tier", "sonnet")
-            cost = TIER_COST_PER_PROMPT.get(tier, 3.0)
 
             agents.append(asdict(AgentState(
                 agent_id=ag.get("branch", agent_file),
@@ -719,7 +712,6 @@ def cmd_start(args: argparse.Namespace) -> None:
                 tier=tier,
                 path=ag.get("path", ""),
                 branch=ag.get("branch", f"agent-{round_num}{wave_idx}-{agent_file}"),
-                estimated_cost=cost,
             )))
 
     state = asdict(RoundState(
@@ -788,8 +780,8 @@ def cmd_status(args: argparse.Namespace) -> None:
 
     print()
     print(Color.c(Color.BOLD, "┌──────────────────────────────────────────────────┐"))
-    print(Color.c(Color.BOLD, f"│ RUNDE {round_num} — Modus {mode} — Budget: ") +
-          Color.c(budget_color, f"${budget_spent:.0f}/${budget_cap} ({budget_pct:.0f}%)"))
+    print(Color.c(Color.BOLD, f"│ RUNDE {round_num} — Modus {mode} — Prompts: ") +
+          Color.c(budget_color, f"{budget_spent}/{budget_cap} ({budget_pct:.0f}%)"))
     print(Color.c(Color.BOLD, "├──────────────────────────────────────────────────┤"))
 
     status_counts: dict[str, int] = {}
@@ -848,7 +840,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"│  Fertig: {done}/{total} | Laufend: {running}/{total} | Failed: {failed}/{total} | Pending: {pending}/{total}")
 
     if budget_pct >= 90:
-        print(Color.c(Color.RED, f"│  ⚠ BUDGET-WARNUNG: {budget_pct:.0f}% verbraucht!"))
+        print(Color.c(Color.RED, f"│  ⚠ PROMPT-LIMIT: {budget_pct:.0f}% verbraucht!"))
     print(Color.c(Color.BOLD, "└──────────────────────────────────────────────────┘"))
     print()
 
@@ -1051,7 +1043,7 @@ def _batch_merge(
         print(Color.c(Color.GREEN, f"  ✓ Batch-Merge erfolgreich: {len(validated)} Agents"))
         for a in validated:
             a["status"] = AgentStatus.MERGED.value
-            state["budget_spent"] = state.get("budget_spent", 0) + a.get("estimated_cost", 0)
+            state["budget_spent"] = state.get("budget_spent", 0) + 1
 
         _post_merge_impact(state)
 
@@ -1078,7 +1070,7 @@ def _serial_merge(agents: list[dict[str, Any]], main_branch: str, state: dict[st
         if result.returncode == 0:
             print(f"  {Color.c(Color.GREEN, '✓')} {a['agent_id']} gemerged")
             a["status"] = AgentStatus.MERGED.value
-            state["budget_spent"] = state.get("budget_spent", 0) + a.get("estimated_cost", 0)
+            state["budget_spent"] = state.get("budget_spent", 0) + 1
         else:
             print(f"  {Color.c(Color.RED, '✗')} {a['agent_id']} Merge-Konflikt")
             git("merge", "--abort", check=False)
@@ -1443,18 +1435,19 @@ def cmd_report(args: argparse.Namespace) -> None:
     failed = sum(1 for a in agents if a["status"] == AgentStatus.FAILED.value)
     skipped = sum(1 for a in agents if a["status"] == AgentStatus.SKIPPED.value)
 
-    # Kosten nach Tier
-    tier_costs: dict[str, float] = {}
+    # Prompts nach Tier zaehlen
+    tier_prompts: dict[str, int] = {}
     for a in agents:
         t = a.get("tier", "sonnet")
-        tier_costs[t] = tier_costs.get(t, 0) + a.get("estimated_cost", 0)
+        tier_prompts[t] = tier_prompts.get(t, 0) + a.get("prompts_used", 1 if a["status"] in (AgentStatus.DONE.value, AgentStatus.MERGED.value) else 0)
 
     # Report generieren
     report_lines = [
         f"# Round {round_num} Report",
         f"**Datum:** {_now_iso()[:10]}",
         f"**Modus:** {state['mode']}",
-        f"**Budget:** ${budget_spent:.0f} / ${budget_cap} ({budget_spent / budget_cap * 100:.0f}%)" if budget_cap else "",
+        f"**Abo-Plan:** Claude Pro/Max (Flatrate)",
+        f"**Prompts:** {budget_spent}/{budget_cap} ({budget_spent / budget_cap * 100:.0f}%)" if budget_cap else "",
         "",
         "## Agents",
         f"- Gesamt: {total}",
@@ -1463,11 +1456,10 @@ def cmd_report(args: argparse.Namespace) -> None:
         f"- Skipped: {skipped}",
         f"- Erfolgsrate: {merged / total * 100:.0f}%" if total > 0 else "",
         "",
-        "## Kosten nach Tier",
-        "*(Hinweis: Heuristische Schaetzwerte — mit echten Abrechnungsdaten kalibrieren)*",
+        "## Prompts nach Tier",
     ]
-    for tier, cost in sorted(tier_costs.items()):
-        report_lines.append(f"- {tier}: ${cost:.1f}")
+    for tier, count in sorted(tier_prompts.items()):
+        report_lines.append(f"- {tier}: {count} Prompts")
 
     report_lines.extend([
         "",
@@ -1517,8 +1509,8 @@ def cmd_report(args: argparse.Namespace) -> None:
     if total > 0:
         print(f"  Agents:     {merged}/{total} gemerged ({merged / total * 100:.0f}%)")
     print(f"  Failed:     {failed}")
-    print(f"  Budget:     ${budget_spent:.0f} / ${budget_cap}")
-    print(f"  Kosten/Tier: {', '.join(f'{t}: ${c:.0f}' for t, c in sorted(tier_costs.items()))}")
+    print(f"  Prompts:    {budget_spent}/{budget_cap}")
+    print(f"  Pro Tier:   {', '.join(f'{t}: {c}' for t, c in sorted(tier_prompts.items()))}")
     print()
 
     if failures:
@@ -1699,7 +1691,7 @@ def cmd_reset(args: argparse.Namespace) -> None:
                 reset_count += 1
 
         state["current_wave"] = 0
-        state["budget_spent"] = 0.0
+        state["budget_spent"] = 0
         save_state(state)
         print(f"  {reset_count} Agents zurueckgesetzt → PENDING")
         print(Color.c(Color.GREEN, "  ✓ Bereit fuer orchestrate start (gleiche Runde)."))
